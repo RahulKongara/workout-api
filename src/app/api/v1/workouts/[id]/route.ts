@@ -6,8 +6,9 @@ import { ErrorResponses } from '@/lib/utils/errors';
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
+    const { id } = await params;
     const startTime = Date.now();
     let keyId: string | undefined;
 
@@ -50,13 +51,13 @@ export async function GET(
             return response;
         }
 
-        const workout = await WorkoutService.getById(params.id, validation.tier!);
+        const workout = await WorkoutService.getById(id, validation.tier!);
 
         if (!workout) {
             const responseTime = Date.now() - startTime;
             await RateLimitService.logUsage(
                 validation.keyId!,
-                `/api/v1/workouts/${params.id}`,
+                `/api/v1/workouts/${id}`,
                 'GET',
                 404,
                 responseTime
@@ -67,7 +68,7 @@ export async function GET(
         const responseTime = Date.now() - startTime;
         const requestId = await RateLimitService.logUsage(
             validation.keyId!,
-            `/api/v1/workouts/${params.id}`,
+            `/api/v1/workouts/${id}`,
             'GET',
             200,
             responseTime
@@ -94,7 +95,7 @@ export async function GET(
             const responseTime = Date.now() - startTime;
             await RateLimitService.logUsage(
                 keyId,
-                `/api/v1/workouts/${params.id}`,
+                `/api/v1/workouts/${id}`,
                 'GET',
                 500,
                 responseTime
