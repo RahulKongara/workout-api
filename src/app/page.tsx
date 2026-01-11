@@ -256,7 +256,7 @@ curl -X GET "https://api.workoutapi.com/v1/workouts?muscle_group=chest" \\
             </div>
           </div>
           <div className="mt-12 pt-8 border-t border-gray-200 text-center text-sm text-gray-600">
-            <p>© 2024 WorkoutAPI. All rights reserved.</p>
+            <p>© 2026 WorkoutAPI by SusEyez Inc. All rights reserved.</p>
           </div>
         </div>
       </footer>
