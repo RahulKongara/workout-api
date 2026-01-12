@@ -91,6 +91,26 @@ export default function DashboardPage() {
         }
     };
 
+    const handleSyncSubscription = async () => {
+        try {
+            const response = await fetch('/api/subscription/sync', {
+                method: 'POST',
+            });
+
+            if (response.ok) {
+                // Refresh dashboard data
+                setLoading(true);
+                await fetchDashboardData();
+                alert('Subscription synced successfully!');
+            } else {
+                throw new Error('Sync failed');
+            }
+        } catch (error) {
+            console.error('Sync error:', error);
+            alert('Failed to sync subscription. Please try again.');
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -128,11 +148,21 @@ export default function DashboardPage() {
                                 <CreditCard className="w-5 h-5" />
                                 Subscription
                             </CardTitle>
-                            <Badge
-                                variant={subscription?.status === 'active' ? 'default' : 'destructive'}
-                            >
-                                {subscription?.status || 'No subscription'}
-                            </Badge>
+                            <div className="flex items-center gap-2">
+                                <Badge
+                                    variant={subscription?.status === 'active' ? 'default' : 'destructive'}
+                                >
+                                    {subscription?.status || 'No subscription'}
+                                </Badge>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleSyncSubscription}
+                                    title="Sync subscription status"
+                                >
+                                    <Activity className="w-4 h-4" />
+                                </Button>
+                            </div>
                         </div>
                     </CardHeader>
                     <CardContent>

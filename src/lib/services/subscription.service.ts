@@ -1,12 +1,10 @@
 import { createAdminClient } from '@/lib/supabase/client';
 import { Subscription, SubscriptionTier } from '@/types';
-import { getRazorpayInstance } from '@/lib/razorpay/client';
+import { getRazorpayInstance as razorpayInstance } from '@/lib/razorpay/client';
 import { ApiKeyService } from './apiKey.service';
 
 export class SubscriptionService {
-    private static get supabase() {
-        return createAdminClient();
-    }
+    private static supabase = createAdminClient();
 
     // Handle Razorpay subscription creation/activation
     static async handleSubscriptionActivated(webhookData: any) {
@@ -69,10 +67,23 @@ export class SubscriptionService {
 
             if (!subscriptionId) return;
 
-            await this.supabase
+            console.log('Processing subscription charged for:', subscriptionId);
+
+            // Update subscription to active status
+            const { error } = await this.supabase
                 .from('subscriptions')
-                .update({ status: 'active' })
+                .update({
+                    status: 'active',
+                    current_period_start: new Date().toISOString(),
+                    current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+                })
                 .eq('stripe_subscription_id', subscriptionId);
+
+            if (error) {
+                console.error('Error updating subscription on payment:', error);
+            } else {
+                console.log('Successfully updated subscription to active');
+            }
         } catch (error) {
             console.error('Handle subscription charged error:', error);
             throw error;
@@ -207,7 +218,7 @@ export class SubscriptionService {
         userName?: string
     ) {
         try {
-            const subscription = await getRazorpayInstance().subscriptions.create({
+            const subscription = await razorpayInstance().subscriptions.create({
                 plan_id: planId,
                 customer_notify: 1,
                 total_count: 12, // 12 billing cycles (1 year for monthly plan)
@@ -235,7 +246,7 @@ export class SubscriptionService {
                     .eq('stripe_subscription_id', subscriptionId);
             } else {
                 // Cancel immediately in Razorpay
-                await getRazorpayInstance().subscriptions.cancel(subscriptionId);
+                await razorpayInstance().subscriptions.cancel(subscriptionId);
             }
 
             return true;
@@ -248,7 +259,7 @@ export class SubscriptionService {
     // Fetch subscription from Razorpay
     static async fetchSubscription(subscriptionId: string) {
         try {
-            const subscription = await getRazorpayInstance().subscriptions.fetch(subscriptionId);
+            const subscription = await razorpayInstance().subscriptions.fetch(subscriptionId);
             return subscription;
         } catch (error) {
             console.error('Fetch subscription error:', error);

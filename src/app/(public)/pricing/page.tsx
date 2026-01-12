@@ -40,26 +40,84 @@ export default function PricingPage() {
                 return;
             }
 
+            // First, create subscription record on backend with tier info
+            const createResponse = await fetch('/api/subscription/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ planId, tier }), // Pass tier to backend
+            });
+
+            if (!createResponse.ok) {
+                throw new Error('Failed to create subscription');
+            }
+
+            const { subscriptionId, razorpayKeyId } = await createResponse.json();
+
             const { data: userData } = await supabase
                 .from('users')
                 .select('email, company_name')
                 .eq('id', user.id)
                 .single();
 
-            await createSubscription(planId, {
-                userEmail: userData?.email || user.email!,
-                userName: userData?.company_name,
-                onSuccess: () => {
-                    router.push('/dashboard?success=true');
+            // Open Razorpay checkout with the subscription ID
+            if (!(window as any).Razorpay) {
+                const script = document.createElement('script');
+                script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+                script.async = true;
+                document.body.appendChild(script);
+                await new Promise((resolve) => (script.onload = resolve));
+            }
+
+            const rzpOptions = {
+                key: razorpayKeyId,
+                subscription_id: subscriptionId,
+                name: 'WorkoutAPI',
+                description: `${tier.charAt(0).toUpperCase() + tier.slice(1)} Plan Subscription`,
+                image: '/logo.png',
+                prefill: {
+                    email: userData?.email || user.email!,
+                    name: userData?.company_name,
                 },
-                onError: (error) => {
-                    console.error('Subscription error:', error);
-                    alert('Failed to create subscription. Please try again.');
-                    setLoading(null);
+                theme: {
+                    color: '#3B82F6',
                 },
-            });
+                handler: async (response: any) => {
+                    try {
+                        // Verify payment on backend
+                        const verifyResponse = await fetch('/api/subscription/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_subscription_id: response.razorpay_subscription_id,
+                                razorpay_signature: response.razorpay_signature,
+                            }),
+                        });
+
+                        if (!verifyResponse.ok) {
+                            throw new Error('Payment verification failed');
+                        }
+
+                        // Success! Redirect to dashboard
+                        router.push('/dashboard?success=true');
+                    } catch (error) {
+                        console.error('Payment verification error:', error);
+                        alert('Payment verification failed. Please contact support.');
+                        setLoading(null);
+                    }
+                },
+                modal: {
+                    ondismiss: () => {
+                        setLoading(null);
+                    },
+                },
+            };
+
+            const rzp = new (window as any).Razorpay(rzpOptions);
+            rzp.open();
         } catch (error) {
             console.error('Subscribe error:', error);
+            alert('Failed to initiate subscription. Please try again.');
             setLoading(null);
         }
     };
@@ -114,8 +172,8 @@ export default function PricingPage() {
                         <Card
                             key={plan.name}
                             className={`relative ${plan.popular
-                                ? 'border-2 border-blue-500 shadow-xl'
-                                : 'border border-gray-200'
+                                    ? 'border-2 border-blue-500 shadow-xl'
+                                    : 'border border-gray-200'
                                 }`}
                         >
                             {plan.popular && (
@@ -144,8 +202,8 @@ export default function PricingPage() {
                                     onClick={plan.buttonAction}
                                     disabled={loading === plan.name.toLowerCase()}
                                     className={`w-full ${plan.popular
-                                        ? 'bg-blue-500 hover:bg-blue-600'
-                                        : 'bg-gray-900 hover:bg-gray-800'
+                                            ? 'bg-blue-500 hover:bg-blue-600'
+                                            : 'bg-gray-900 hover:bg-gray-800'
                                         }`}
                                 >
                                     {loading === plan.name.toLowerCase() ? (
