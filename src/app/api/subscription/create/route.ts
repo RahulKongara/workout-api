@@ -89,7 +89,11 @@ export async function POST(request: NextRequest) {
             razorpayKeyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
         });
     } catch (error: any) {
-        console.error('Create subscription error:', error);
+        console.error('Create subscription error:', {
+            message: error.message,
+            stack: error.stack,
+            name: error.name,
+        });
         return NextResponse.json(
             { error: error.message || 'Failed to create subscription' },
             { status: 500 }
