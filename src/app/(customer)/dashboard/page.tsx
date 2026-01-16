@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { formatNumber, calculatePercentage } from '@/lib/utils/helpers';
 import { TIER_LIMITS, SubscriptionTier } from '@/lib/constants';
+import { toast } from 'sonner';
 
 export default function DashboardPage() {
     const [loading, setLoading] = useState(true);
@@ -101,13 +102,13 @@ export default function DashboardPage() {
                 // Refresh dashboard data
                 setLoading(true);
                 await fetchDashboardData();
-                alert('Subscription synced successfully!');
+                toast.success('Subscription synced successfully!');
             } else {
                 throw new Error('Sync failed');
             }
         } catch (error) {
             console.error('Sync error:', error);
-            alert('Failed to sync subscription. Please try again.');
+            toast.error('Failed to sync subscription. Please try again.');
         }
     };
 

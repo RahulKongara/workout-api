@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Check, Zap } from 'lucide-react';
 import { useRazorpay } from '@/lib/hooks/useRazorpay';
 import { TIER_FEATURES, TIER_PRICES } from '@/lib/constants';
+import { toast } from 'sonner';
 
 export default function PricingPage() {
     const [loading, setLoading] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export default function PricingPage() {
                 : process.env.NEXT_PUBLIC_RAZORPAY_PLAN_ID_ENTERPRISE;
 
             if (!planId) {
-                alert('Plan ID not configured');
+                toast.error('Plan ID not configured');
                 setLoading(null);
                 return;
             }
@@ -102,7 +103,7 @@ export default function PricingPage() {
                         router.push('/dashboard?success=true');
                     } catch (error) {
                         console.error('Payment verification error:', error);
-                        alert('Payment verification failed. Please contact support.');
+                        toast.error('Payment verification failed. Please contact support.');
                         setLoading(null);
                     }
                 },
@@ -117,7 +118,7 @@ export default function PricingPage() {
             rzp.open();
         } catch (error) {
             console.error('Subscribe error:', error);
-            alert('Failed to initiate subscription. Please try again.');
+            toast.error('Failed to initiate subscription. Please try again.');
             setLoading(null);
         }
     };

@@ -17,6 +17,7 @@ import {
 import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { Workout } from '@/types';
 import { formatDate } from '@/lib/utils/helpers';
+import { toast } from 'sonner';
 
 export default function AdminWorkoutsPage() {
     const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -72,9 +73,10 @@ export default function AdminWorkoutsPage() {
             .eq('id', id);
 
         if (error) {
-            alert('Failed to delete workout');
+            toast.error('Failed to delete workout');
             console.error(error);
         } else {
+            toast.success('Workout deleted successfully');
             fetchWorkouts();
         }
     };

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/client';
 import { SubscriptionService } from '@/lib/services/subscription.service';
 
 export async function POST(request: NextRequest) {
@@ -24,8 +25,29 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid tier' }, { status: 400 });
         }
 
+        const adminSupabase = createAdminClient();
+
+        // Check for existing active subscription to prevent accidental overwrites
+        const { data: existingSubscription } = await adminSupabase
+            .from('subscriptions')
+            .select('id, status, tier, stripe_subscription_id')
+            .eq('user_id', user.id)
+            .in('status', ['active', 'trialing'])
+            .maybeSingle();
+
+        if (existingSubscription) {
+            return NextResponse.json(
+                {
+                    error: 'Active subscription already exists',
+                    currentTier: existingSubscription.tier,
+                    hint: 'Cancel your current subscription first or upgrade via the dashboard'
+                },
+                { status: 409 } // Conflict
+            );
+        }
+
         // Get user details
-        const { data: userData } = await (await supabase)
+        const { data: userData } = await adminSupabase
             .from('users')
             .select('email, company_name')
             .eq('id', user.id)
@@ -40,13 +62,12 @@ export async function POST(request: NextRequest) {
         );
 
         // Store pending subscription info for webhook to complete
-        // This helps track which tier the user is subscribing to
-        const { error: insertError } = await (await supabase)
+        const { error: insertError } = await adminSupabase
             .from('subscriptions')
             .upsert({
                 user_id: user.id,
                 stripe_subscription_id: subscription.id,
-                tier: tier, // Store the tier they're subscribing to
+                tier: tier,
                 status: 'incomplete', // Will be updated by webhook to 'active'
                 stripe_customer_id: subscription.customer_id,
             }, {
@@ -56,6 +77,11 @@ export async function POST(request: NextRequest) {
 
         if (insertError) {
             console.error('Error creating subscription record:', insertError);
+            // Return error instead of continuing silently
+            return NextResponse.json(
+                { error: 'Failed to create subscription record' },
+                { status: 500 }
+            );
         }
 
         return NextResponse.json({

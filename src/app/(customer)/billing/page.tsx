@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { formatDate, formatCurrency } from '@/lib/utils/helpers';
 import { TIER_PRICES, TIER_LIMITS } from '@/lib/constants';
+import { toast } from 'sonner';
 
 export default function BillingPage() {
     const [subscription, setSubscription] = useState<any>(null);
@@ -79,10 +80,10 @@ export default function BillingPage() {
                 throw new Error(data.error || 'Failed to cancel subscription');
             }
 
-            alert('Subscription cancelled successfully. You will retain access until the end of your billing period.');
+            toast.success('Subscription cancelled successfully. You will retain access until the end of your billing period.');
             fetchSubscription();
         } catch (error: any) {
-            alert(error.message);
+            toast.error(error.message);
         } finally {
             setCanceling(false);
         }

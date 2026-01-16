@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/client';
+import { getRazorpayInstance } from '@/lib/razorpay/client';
+
+// Status mapping consistent with subscription.service.ts
+const RAZORPAY_STATUS_MAP: Record<string, string> = {
+    created: 'incomplete',
+    authenticated: 'incomplete',
+    active: 'active',
+    pending: 'past_due',
+    halted: 'past_due',
+    cancelled: 'canceled',
+    completed: 'canceled',
+    expired: 'canceled',
+};
 
 // Manual sync endpoint to check subscription status
 // Useful if webhooks are delayed or fail
@@ -44,36 +57,25 @@ export async function POST(request: NextRequest) {
         // If subscription exists and has a Razorpay ID, fetch latest status from Razorpay
         if (subscription.stripe_subscription_id) {
             try {
-                const razorpay = require('razorpay');
-                const razorpayInstance = new razorpay({
-                    key_id: process.env.RAZORPAY_KEY_ID!,
-                    key_secret: process.env.RAZORPAY_KEY_SECRET!,
-                });
-
-                const rzpSubscription = await razorpayInstance.subscriptions.fetch(
+                // Use shared Razorpay instance
+                const razorpay = getRazorpayInstance();
+                const rzpSubscription = await razorpay.subscriptions.fetch(
                     subscription.stripe_subscription_id
                 );
 
-                // Update local subscription with Razorpay data
-                const statusMap: Record<string, any> = {
-                    created: 'incomplete',
-                    authenticated: 'active',
-                    active: 'active',
-                    pending: 'past_due',
-                    halted: 'past_due',
-                    cancelled: 'canceled',
-                    completed: 'canceled',
-                    expired: 'canceled',
-                };
-
-                const updatedStatus = statusMap[rzpSubscription.status] || 'incomplete';
+                // Use consistent status mapping
+                const updatedStatus = RAZORPAY_STATUS_MAP[rzpSubscription.status] || 'incomplete';
 
                 await adminSupabase
                     .from('subscriptions')
                     .update({
                         status: updatedStatus,
-                        current_period_start: new Date(rzpSubscription.current_start * 1000).toISOString(),
-                        current_period_end: new Date(rzpSubscription.current_end * 1000).toISOString(),
+                        ...(rzpSubscription.current_start && {
+                            current_period_start: new Date(rzpSubscription.current_start * 1000).toISOString(),
+                        }),
+                        ...(rzpSubscription.current_end && {
+                            current_period_end: new Date(rzpSubscription.current_end * 1000).toISOString(),
+                        }),
                     })
                     .eq('id', subscription.id);
 

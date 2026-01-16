@@ -69,13 +69,29 @@ export class SubscriptionService {
 
             console.log('Processing subscription charged for:', subscriptionId);
 
-            // Update subscription to active status
+            // Fetch subscription details from Razorpay to get actual billing period
+            let periodStart = new Date().toISOString();
+            let periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // Default 30 days
+
+            try {
+                const rzpSubscription = await this.fetchSubscription(subscriptionId);
+                if (rzpSubscription.current_start) {
+                    periodStart = new Date(rzpSubscription.current_start * 1000).toISOString();
+                }
+                if (rzpSubscription.current_end) {
+                    periodEnd = new Date(rzpSubscription.current_end * 1000).toISOString();
+                }
+            } catch (fetchError) {
+                console.warn('Could not fetch subscription details, using defaults:', fetchError);
+            }
+
+            // Update subscription to active status with actual billing period
             const { error } = await this.supabase
                 .from('subscriptions')
                 .update({
                     status: 'active',
-                    current_period_start: new Date().toISOString(),
-                    current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+                    current_period_start: periodStart,
+                    current_period_end: periodEnd,
                 })
                 .eq('stripe_subscription_id', subscriptionId);
 

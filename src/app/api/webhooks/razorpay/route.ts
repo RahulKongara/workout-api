@@ -1,24 +1,31 @@
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { SubscriptionService } from '@/lib/services/subscription.service';
-import { verifyWebhookSignature } from '@/lib/razorpay/client';
+import { verifyWebhookSignature, getRazorpayWebhookSecret } from '@/lib/razorpay/client';
 
 export async function POST(req: Request) {
     try {
         const body = await req.text();
-        const signature = (await headers()).get('x-razorpay-signature');
+        const headersList = await headers();
+        const signature = headersList.get('x-razorpay-signature');
+        const eventId = headersList.get('x-razorpay-event-id');
 
         if (!signature) {
             console.error('No Razorpay signature found');
             return NextResponse.json({ error: 'No signature' }, { status: 400 });
         }
 
+        // Get webhook secret with validation
+        let webhookSecret: string;
+        try {
+            webhookSecret = getRazorpayWebhookSecret();
+        } catch (error) {
+            console.error('Webhook secret not configured:', error);
+            return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+        }
+
         // Verify webhook signature
-        const isValid = verifyWebhookSignature(
-            body,
-            signature,
-            process.env.RAZORPAY_WEBHOOK_SECRET!
-        );
+        const isValid = verifyWebhookSignature(body, signature, webhookSecret);
 
         if (!isValid) {
             console.error('Invalid Razorpay webhook signature');
@@ -28,7 +35,7 @@ export async function POST(req: Request) {
         const webhookData = JSON.parse(body);
         const event = webhookData.event;
 
-        console.log('Received Razorpay webhook:', event);
+        console.log('Received Razorpay webhook:', event, eventId ? `(Event ID: ${eventId})` : '');
 
         // Handle different webhook events
         switch (event) {

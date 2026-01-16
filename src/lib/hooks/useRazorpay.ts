@@ -1,16 +1,39 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 
 interface RazorpayOptions {
-  onSuccess?: (response: any) => void;
-  onError?: (error: any) => void;
+  onSuccess?: (response: RazorpayResponse) => void;
+  onError?: (error: Error) => void;
   userEmail?: string;
   userName?: string;
+}
+
+interface RazorpayResponse {
+  razorpay_payment_id: string;
+  razorpay_subscription_id: string;
+  razorpay_signature: string;
+}
+
+// Script loading with error handling
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).Razorpay) {
+      resolve();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Razorpay SDK'));
+    document.body.appendChild(script);
+  });
 }
 
 export function useRazorpay() {
   const [loading, setLoading] = useState(false);
 
-  const createSubscription = async (
+  const createSubscription = useCallback(async (
     planId: string,
     options: RazorpayOptions = {}
   ) => {
@@ -31,14 +54,12 @@ export function useRazorpay() {
 
       const { subscriptionId, razorpayKeyId } = await response.json();
 
-      // Load Razorpay script if not already loaded
-      if (!(window as any).Razorpay) {
-        const script = document.createElement('script');
-        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        script.async = true;
-        document.body.appendChild(script);
-        await new Promise((resolve) => (script.onload = resolve));
+      if (!razorpayKeyId) {
+        throw new Error('Razorpay key not configured');
       }
+
+      // Load Razorpay script with error handling
+      await loadRazorpayScript();
 
       // Razorpay checkout options
       const rzpOptions = {
@@ -46,7 +67,7 @@ export function useRazorpay() {
         subscription_id: subscriptionId,
         name: 'WorkoutAPI',
         description: 'Subscription Payment',
-        image: '/logo.png', // Add your logo
+        image: '/logo.png',
         prefill: {
           email: options.userEmail,
           name: options.userName,
@@ -54,7 +75,7 @@ export function useRazorpay() {
         theme: {
           color: '#3B82F6',
         },
-        handler: async (response: any) => {
+        handler: async (response: RazorpayResponse) => {
           try {
             // Verify payment on backend
             const verifyResponse = await fetch('/api/subscription/verify', {
@@ -74,7 +95,7 @@ export function useRazorpay() {
             options.onSuccess?.(response);
           } catch (error) {
             console.error('Payment verification error:', error);
-            options.onError?.(error);
+            options.onError?.(error instanceof Error ? error : new Error('Verification failed'));
           } finally {
             setLoading(false);
           }
@@ -93,9 +114,9 @@ export function useRazorpay() {
     } catch (error) {
       console.error('Create subscription error:', error);
       setLoading(false);
-      options.onError?.(error);
+      options.onError?.(error instanceof Error ? error : new Error('Subscription failed'));
     }
-  };
+  }, []);
 
   return {
     createSubscription,

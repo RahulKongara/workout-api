@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { maskApiKey, formatDateTime } from '@/lib/utils/helpers';
 import { TIER_LIMITS, SubscriptionTier } from '@/lib/constants';
+import { toast } from 'sonner';
 
 export default function ApiKeysPage() {
     const [apiKeys, setApiKeys] = useState<any[]>([]);
@@ -101,7 +102,7 @@ export default function ApiKeysPage() {
             setNewKeyName('');
             fetchData();
         } catch (error: any) {
-            alert(error.message);
+            toast.error(error.message);
         } finally {
             setCreating(false);
         }
@@ -124,8 +125,9 @@ export default function ApiKeysPage() {
             }
 
             fetchData();
+            toast.success('API key deleted successfully');
         } catch (error: any) {
-            alert(error.message);
+            toast.error(error.message);
         }
     };
 
