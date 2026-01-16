@@ -64,15 +64,12 @@ export async function POST(request: NextRequest) {
         // Store pending subscription info for webhook to complete
         const { error: insertError } = await adminSupabase
             .from('subscriptions')
-            .upsert({
+            .insert({
                 user_id: user.id,
                 stripe_subscription_id: subscription.id,
                 tier: tier,
                 status: 'incomplete', // Will be updated by webhook to 'active'
                 stripe_customer_id: subscription.customer_id,
-            }, {
-                onConflict: 'user_id',
-                ignoreDuplicates: false,
             });
 
         if (insertError) {
