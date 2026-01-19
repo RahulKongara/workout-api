@@ -51,28 +51,33 @@ export default function CustomersPage() {
 
     const fetchCustomers = async () => {
         try {
+            // Fetch users with their subscriptions
+            // Note: We'll get the most recent subscription separately since
+            // Supabase doesn't support ordering nested relations in the same query
             const { data, error } = await supabase
                 .from('users')
                 .select(`
-          id,
-          email,
-          company_name,
-          created_at,
-          subscriptions (
-            tier,
-            status,
-            current_period_end
-          )
-        `)
+                    id,
+                    email,
+                    company_name,
+                    created_at
+                `)
                 .eq('role', 'customer')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
 
-            // Get API usage for each user
+            // Get API usage and subscription for each user
             const customersWithUsage = await Promise.all(
                 (data || []).map(async (customer) => {
-                    const subscription = (customer.subscriptions as any)?.[0];
+                    // Get the most recent subscription for this user
+                    const { data: subscriptionData } = await supabase
+                        .from('subscriptions')
+                        .select('tier, status, current_period_end')
+                        .eq('user_id', customer.id)
+                        .order('updated_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
 
                     // Get API keys
                     const { data: apiKeys } = await supabase
@@ -95,7 +100,7 @@ export default function CustomersPage() {
 
                     return {
                         ...customer,
-                        subscription,
+                        subscription: subscriptionData,
                         apiKeyCount: apiKeys?.length || 0,
                         totalRequests: usageCount,
                     };

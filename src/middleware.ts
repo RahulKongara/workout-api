@@ -17,7 +17,7 @@ export async function middleware(request: NextRequest) {
     '/_next',
     '/favicon.ico',
   ];
-  
+
   if (publicPaths.some((p) => path.startsWith(p))) {
     return NextResponse.next();
   }
