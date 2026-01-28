@@ -1,10 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/client';
 import { CacheService, CACHE_TTL } from '@/lib/services/cache.service';
+import { SubscriptionTier } from '@/types';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
 type ApiKeyValidationResult =
-    | { valid: true; keyId: string; userId: string; tier: string }
+    | { valid: true; keyId: string; userId: string; tier: SubscriptionTier }
     | { valid: false; error: string };
 
 export class ApiKeyService {

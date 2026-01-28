@@ -34,26 +34,30 @@ export async function GET(request: NextRequest) {
 
         // Check rate limits
         const rateLimit = await RateLimitService.checkRateLimit(
-            validation.keyId!,
-            validation.tier!
+            validation.keyId,
+            validation.tier
         );
 
         if (!rateLimit.allowed) {
-            const limit = 'limit' in rateLimit ? rateLimit.limit : 0;
-            const limitType = 'limitType' in rateLimit ? rateLimit.limitType : 'minute';
+            // Handle error case without resetAt
+            if ('error' in rateLimit) {
+                return ErrorResponses.internalError(requestId);
+            }
+
+            const limit = rateLimit.limit ?? 0;
             const response = ErrorResponses.rateLimitExceeded(
-                limit || 0,
-                rateLimit.resetAt!,
-                limitType || 'minute',
+                limit,
+                rateLimit.resetAt,
+                rateLimit.limitType,
                 requestId
             );
 
-            response.headers.set('X-RateLimit-Limit', String(limit || 0));
+            response.headers.set('X-RateLimit-Limit', String(limit));
             response.headers.set('X-RateLimit-Remaining', '0');
-            response.headers.set('X-RateLimit-Reset', rateLimit.resetAt!.toISOString());
+            response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toISOString());
             response.headers.set(
                 'Retry-After',
-                String(Math.ceil((rateLimit.resetAt!.getTime() - Date.now()) / 1000))
+                String(Math.ceil((rateLimit.resetAt.getTime() - Date.now()) / 1000))
             );
 
             return response;
@@ -85,10 +89,9 @@ export async function GET(request: NextRequest) {
         });
 
         // Add rate limit headers
-        const limitValue = 'limit' in rateLimit ? rateLimit.limit : 0;
-        response.headers.set('X-RateLimit-Limit', String(limitValue));
+        response.headers.set('X-RateLimit-Limit', String(rateLimit.limit));
         response.headers.set('X-RateLimit-Remaining', String(rateLimit.remaining));
-        response.headers.set('X-RateLimit-Reset', rateLimit.resetAt!.toISOString());
+        response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toISOString());
 
         return response;
     } catch (error) {

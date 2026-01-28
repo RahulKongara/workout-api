@@ -3,7 +3,6 @@ import { ApiKeyService } from '@/lib/services/apiKey.service';
 import { RateLimitService } from '@/lib/services/rateLimit.service';
 import { WorkoutService } from '@/lib/services/workout.service';
 import { ErrorResponses } from '@/lib/utils/errors';
-
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -32,31 +31,36 @@ export async function GET(
         keyId = validation.keyId;
 
         const rateLimit = await RateLimitService.checkRateLimit(
-            validation.keyId!,
-            validation.tier!
+            validation.keyId,
+            validation.tier
         );
 
         if (!rateLimit.allowed) {
-            const limit = 'limit' in rateLimit ? rateLimit.limit : 0;
+            // Handle error case without resetAt
+            if ('error' in rateLimit) {
+                return ErrorResponses.internalError();
+            }
+
+            const limit = rateLimit.limit ?? 0;
             const response = ErrorResponses.rateLimitExceeded(
-                limit || 0,
-                rateLimit.resetAt!,
-                ('limitType' in rateLimit && rateLimit.limitType) || 'minute'
+                limit,
+                rateLimit.resetAt,
+                rateLimit.limitType
             );
 
-            response.headers.set('X-RateLimit-Limit', String(limit || 0));
+            response.headers.set('X-RateLimit-Limit', String(limit));
             response.headers.set('X-RateLimit-Remaining', '0');
-            response.headers.set('X-RateLimit-Reset', rateLimit.resetAt!.toISOString());
+            response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toISOString());
 
             return response;
         }
 
-        const workout = await WorkoutService.getById(id, validation.tier!);
+        const workout = await WorkoutService.getById(id, validation.tier);
 
         if (!workout) {
             const responseTime = Date.now() - startTime;
             await RateLimitService.logUsage(
-                validation.keyId!,
+                validation.keyId,
                 `/api/v1/workouts/${id}`,
                 'GET',
                 404,
@@ -67,7 +71,7 @@ export async function GET(
 
         const responseTime = Date.now() - startTime;
         const requestId = await RateLimitService.logUsage(
-            validation.keyId!,
+            validation.keyId,
             `/api/v1/workouts/${id}`,
             'GET',
             200,
@@ -83,9 +87,9 @@ export async function GET(
             },
         });
 
-        response.headers.set('X-RateLimit-Limit', String((rateLimit as { limit?: number }).limit || 0));
+        response.headers.set('X-RateLimit-Limit', String(rateLimit.limit));
         response.headers.set('X-RateLimit-Remaining', String(rateLimit.remaining));
-        response.headers.set('X-RateLimit-Reset', rateLimit.resetAt!.toISOString());
+        response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toISOString());
 
         return response;
     } catch (error) {
