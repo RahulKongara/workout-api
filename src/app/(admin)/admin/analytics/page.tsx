@@ -39,7 +39,11 @@ export default function AnalyticsPage() {
         totalRevenue: 0,
         totalWorkouts: 0,
     });
-    const [topWorkouts, setTopWorkouts] = useState<any[]>([]);
+    const [popularFilters, setPopularFilters] = useState<{
+        difficulties: { name: string; count: number }[];
+        muscleGroups: { name: string; count: number }[];
+        searches: { name: string; count: number }[];
+    }>({ difficulties: [], muscleGroups: [], searches: [] });
     const [recentActivity, setRecentActivity] = useState<any[]>([]);
     const [subscriptionBreakdown, setSubscriptionBreakdown] = useState({
         free: 0,
@@ -101,63 +105,126 @@ export default function AnalyticsPage() {
             // Calculate revenue (rough estimate)
             const revenue = (breakdown.pro * 29) + (breakdown.enterprise * 99);
 
-            // Top workouts by API requests
+            // Top filters by API requests
             const { data: usageData } = await supabase
                 .from('api_usage')
                 .select('endpoint')
+                .like('endpoint', '%/api/v1/workouts%')
                 .gte('created_at', startDate.toISOString());
 
-            // Extract workout IDs from endpoints
-            const workoutRequests: Record<string, number> = {};
+            // Parse query parameters from endpoints
+            const difficultyCount: Record<string, number> = {};
+            const muscleGroupCount: Record<string, number> = {};
+            const searchCount: Record<string, number> = {};
+
             usageData?.forEach((usage: any) => {
-                const match = usage.endpoint.match(/\/workouts\/([a-f0-9-]+)/);
-                if (match) {
-                    const id = match[1];
-                    workoutRequests[id] = (workoutRequests[id] || 0) + 1;
+                try {
+                    const url = new URL('http://localhost:3000' + usage.endpoint);
+                    const difficulty = url.searchParams.get('difficulty');
+                    const muscleGroup = url.searchParams.get('muscle_group');
+                    const search = url.searchParams.get('search');
+
+                    if (difficulty) {
+                        difficultyCount[difficulty] = (difficultyCount[difficulty] || 0) + 1;
+                    }
+                    if (muscleGroup) {
+                        muscleGroupCount[muscleGroup] = (muscleGroupCount[muscleGroup] || 0) + 1;
+                    }
+                    if (search) {
+                        searchCount[search] = (searchCount[search] || 0) + 1;
+                    }
+                } catch (e) {
+                    // Ignore malformed URLs
+                    console.error('Error parsing URL:', e);
                 }
             });
 
-            // Get top 5 workout IDs
-            const topWorkoutIds = Object.entries(workoutRequests)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 5)
-                .map(([id]) => id);
+            // Convert to sorted arrays
+            const sortedDifficulties = Object.entries(difficultyCount)
+                .map(([name, count]) => ({ name, count }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 5);
 
-            // Fetch workout details
-            if (topWorkoutIds.length > 0) {
-                const { data: workoutsData } = await supabase
-                    .from('workouts')
-                    .select('id, name, difficulty')
-                    .in('id', topWorkoutIds);
+            const sortedMuscleGroups = Object.entries(muscleGroupCount)
+                .map(([name, count]) => ({ name, count }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 5);
 
-                const topWorkoutsWithCount = workoutsData?.map((w: { id: string | number; }) => ({
-                    ...w,
-                    requests: workoutRequests[w.id],
-                })).sort((a: { requests: number; }, b: { requests: number; }) => b.requests - a.requests) || [];
+            const sortedSearches = Object.entries(searchCount)
+                .map(([name, count]) => ({ name, count }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 5);
 
-                setTopWorkouts(topWorkoutsWithCount);
-            }
+            setPopularFilters({
+                difficulties: sortedDifficulties,
+                muscleGroups: sortedMuscleGroups,
+                searches: sortedSearches,
+            });
 
-            // Recent activity
-            const { data: recentUsage } = await supabase
+            // Recent activity - just get basic usage data
+            const { data: recentUsage, error: usageError } = await supabase
                 .from('api_usage')
-                .select(`
-          id,
-          endpoint,
-          method,
-          status_code,
-          created_at,
-          api_keys (
-            name,
-            users (
-              email
-            )
-          )
-        `)
+                .select('id, endpoint, method, status_code, created_at, api_key_id')
                 .order('created_at', { ascending: false })
                 .limit(10);
 
-            setRecentActivity(recentUsage || []);
+            if (usageError) {
+                console.error('Usage error:', usageError);
+            }
+
+            // Get unique API key IDs
+            const apiKeyIds = [...new Set(recentUsage?.map((u: any) => u.api_key_id).filter(Boolean) || [])];
+
+            let apiKeyMap: Record<string, { name: string; user_id: string }> = {};
+            let userMap: Record<string, string> = {};
+
+            if (apiKeyIds.length > 0) {
+                // Fetch API keys
+                const { data: apiKeysData, error: apiKeysError } = await supabase
+                    .from('api_keys')
+                    .select('id, name, user_id')
+                    .in('id', apiKeyIds);
+
+                if (apiKeysError) {
+                    console.error('API keys error:', apiKeysError);
+                }
+
+                apiKeysData?.forEach((key: any) => {
+                    apiKeyMap[key.id] = { name: key.name, user_id: key.user_id };
+                });
+
+                // Get user IDs from API keys
+                const userIds = [...new Set(apiKeysData?.map((k: any) => k.user_id).filter(Boolean) || [])];
+
+                if (userIds.length > 0) {
+                    // Fetch users
+                    const { data: usersData, error: usersError } = await supabase
+                        .from('users')
+                        .select('id, email')
+                        .in('id', userIds);
+
+                    if (usersError) {
+                        console.error('Users error:', usersError);
+                    }
+
+                    usersData?.forEach((user: any) => {
+                        userMap[user.id] = user.email;
+                    });
+                }
+            }
+
+            // Add user email to recent activity
+            const activityWithUsers = recentUsage?.map((activity: any) => {
+                const apiKey = activity.api_key_id ? apiKeyMap[activity.api_key_id] : null;
+                const userEmail = apiKey?.user_id ? userMap[apiKey.user_id] : null;
+                return {
+                    ...activity,
+                    apiKeyName: apiKey?.name || null,
+                    userEmail: userEmail,
+                };
+            }) || [];
+
+            setRecentActivity(activityWithUsers);
 
             setStats({
                 totalRequests: requestCount || 0,
@@ -285,41 +352,80 @@ export default function AnalyticsPage() {
                 </CardContent>
             </Card>
 
-            {/* Top Workouts */}
+            {/* Popular Filters */}
             <Card>
                 <CardHeader>
-                    <CardTitle>Most Requested Workouts</CardTitle>
+                    <CardTitle>Most Popular Filters</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    {topWorkouts.length === 0 ? (
+                    {popularFilters.difficulties.length === 0 &&
+                        popularFilters.muscleGroups.length === 0 &&
+                        popularFilters.searches.length === 0 ? (
                         <p className="text-center text-gray-500 py-8">
-                            No workout requests in this period
+                            No filter usage in this period
                         </p>
                     ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Rank</TableHead>
-                                    <TableHead>Workout</TableHead>
-                                    <TableHead>Difficulty</TableHead>
-                                    <TableHead className="text-right">Requests</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {topWorkouts.map((workout, index) => (
-                                    <TableRow key={workout.id}>
-                                        <TableCell className="font-medium">#{index + 1}</TableCell>
-                                        <TableCell>{workout.name}</TableCell>
-                                        <TableCell>
-                                            <Badge variant="outline">{workout.difficulty}</Badge>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            {formatNumber(workout.requests)}
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {/* Difficulty Levels */}
+                            <div>
+                                <h4 className="font-medium text-gray-700 mb-3">Difficulty Levels</h4>
+                                {popularFilters.difficulties.length === 0 ? (
+                                    <p className="text-sm text-gray-400">No data</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {popularFilters.difficulties.map((item, idx) => (
+                                            <div key={item.name} className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-gray-500">#{idx + 1}</span>
+                                                    <Badge variant="outline" className="capitalize">{item.name}</Badge>
+                                                </div>
+                                                <span className="text-sm font-medium">{item.count}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Muscle Groups */}
+                            <div>
+                                <h4 className="font-medium text-gray-700 mb-3">Muscle Groups</h4>
+                                {popularFilters.muscleGroups.length === 0 ? (
+                                    <p className="text-sm text-gray-400">No data</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {popularFilters.muscleGroups.map((item, idx) => (
+                                            <div key={item.name} className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-gray-500">#{idx + 1}</span>
+                                                    <Badge variant="outline" className="capitalize">{item.name}</Badge>
+                                                </div>
+                                                <span className="text-sm font-medium">{item.count}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Search Terms */}
+                            <div>
+                                <h4 className="font-medium text-gray-700 mb-3">Search Terms</h4>
+                                {popularFilters.searches.length === 0 ? (
+                                    <p className="text-sm text-gray-400">No data</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {popularFilters.searches.map((item, idx) => (
+                                            <div key={item.name} className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-gray-500">#{idx + 1}</span>
+                                                    <span className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded">{item.name}</span>
+                                                </div>
+                                                <span className="text-sm font-medium">{item.count}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     )}
                 </CardContent>
             </Card>
@@ -351,7 +457,7 @@ export default function AnalyticsPage() {
                                 recentActivity.map((activity) => (
                                     <TableRow key={activity.id}>
                                         <TableCell className="text-sm">
-                                            {(activity.api_keys as any)?.users?.email || 'Unknown'}
+                                            {activity.userEmail || activity.apiKeyName || 'Unknown'}
                                         </TableCell>
                                         <TableCell className="text-sm font-mono">
                                             {activity.endpoint}

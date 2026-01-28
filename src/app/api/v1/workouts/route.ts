@@ -2,33 +2,38 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ApiKeyService } from '@/lib/services/apiKey.service';
 import { RateLimitService } from '@/lib/services/rateLimit.service';
 import { WorkoutService } from '@/lib/services/workout.service';
+import { ApiLoggerService } from '@/lib/services/apiLogger.service';
 import { ErrorResponses } from '@/lib/utils/errors';
 import { WorkoutFilterSchema } from '@/lib/utils/validation';
+import { generateRequestId } from '@/lib/utils/helpers';
 
 export async function GET(request: NextRequest) {
     const startTime = Date.now();
+    const requestId = generateRequestId();
     let keyId: string | undefined;
+    let tier: string | undefined;
 
     try {
         // Extract API key
         const apiKey = request.headers.get('authorization')?.replace('Bearer ', '');
         if (!apiKey) {
-            return ErrorResponses.missingApiKey();
+            return ErrorResponses.missingApiKey(requestId);
         }
 
         // Validate API key
         const validation = await ApiKeyService.validateKey(apiKey);
         if (!validation.valid) {
             if (validation.error?.includes('expired')) {
-                return ErrorResponses.expiredApiKey();
+                return ErrorResponses.expiredApiKey(requestId);
             }
             if (validation.error?.includes('inactive')) {
-                return ErrorResponses.subscriptionInactive();
+                return ErrorResponses.subscriptionInactive(requestId);
             }
-            return ErrorResponses.invalidApiKey();
+            return ErrorResponses.invalidApiKey(requestId);
         }
 
         keyId = validation.keyId;
+        tier = validation.tier;
 
         // Check rate limits
         const rateLimit = await RateLimitService.checkRateLimit(
@@ -42,7 +47,8 @@ export async function GET(request: NextRequest) {
             const response = ErrorResponses.rateLimitExceeded(
                 limit || 0,
                 rateLimit.resetAt!,
-                limitType || 'minute'
+                limitType || 'minute',
+                requestId
             );
 
             response.headers.set('X-RateLimit-Limit', String(limit || 0));
@@ -74,7 +80,7 @@ export async function GET(request: NextRequest) {
         });
 
         if (!validationResult.success) {
-            return ErrorResponses.validationError(validationResult.error.format());
+            return ErrorResponses.validationError(validationResult.error.format(), requestId);
         }
 
         const params = validationResult.data;
@@ -92,13 +98,28 @@ export async function GET(request: NextRequest) {
 
         // Log usage
         const responseTime = Date.now() - startTime;
-        const requestId = await RateLimitService.logUsage(
-            validation.keyId!,
-            '/api/v1/workouts',
-            'GET',
-            200,
-            responseTime
-        );
+        const fullEndpoint = request.nextUrl.pathname + request.nextUrl.search;
+        await ApiLoggerService.logRequest({
+            requestId,
+            apiKeyId: keyId,
+            endpoint: fullEndpoint,
+            method: 'GET',
+            statusCode: 200,
+            responseTimeMs: responseTime,
+            tier,
+            userAgent: request.headers.get('user-agent') || undefined,
+            metadata: {
+                page: params.page,
+                limit: params.limit,
+                resultCount: result.data.length,
+                filters: {
+                    difficulty: params.difficulty,
+                    muscle_group: params.muscle_group,
+                    equipment: params.equipment,
+                    search: params.search,
+                },
+            },
+        });
 
         const response = NextResponse.json({
             data: result.data,
@@ -120,12 +141,20 @@ export async function GET(request: NextRequest) {
     } catch (error) {
         console.error('API Error:', error);
 
-        // Log error
-        if (keyId) {
-            const responseTime = Date.now() - startTime;
-            await RateLimitService.logUsage(keyId, '/api/v1/workouts', 'GET', 500, responseTime);
-        }
+        const responseTime = Date.now() - startTime;
 
-        return ErrorResponses.internalError();
+        // Log error
+        await ApiLoggerService.logError({
+            requestId,
+            apiKeyId: keyId,
+            endpoint: '/api/v1/workouts',
+            method: 'GET',
+            statusCode: 500,
+            responseTimeMs: responseTime,
+            error: error instanceof Error ? error : { code: 'INTERNAL_ERROR', message: 'Unknown error' },
+            tier,
+        });
+
+        return ErrorResponses.internalError(requestId);
     }
 }

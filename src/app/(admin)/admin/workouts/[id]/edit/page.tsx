@@ -4,8 +4,6 @@ import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter, useParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { WorkoutSchema, WorkoutFormData } from '@/lib/utils/validation';
 import { MUSCLE_GROUPS, EQUIPMENT_OPTIONS } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,17 +39,21 @@ export default function EditWorkoutPage() {
 
     const {
         register,
-        handleSubmit,
         setValue,
+        getValues,
         formState: { errors },
     } = useForm({
-        resolver: zodResolver(WorkoutSchema),
-    }) as {
-        register: ReturnType<typeof useForm<WorkoutFormData>>['register'];
-        handleSubmit: ReturnType<typeof useForm<WorkoutFormData>>['handleSubmit'];
-        setValue: ReturnType<typeof useForm<WorkoutFormData>>['setValue'];
-        formState: ReturnType<typeof useForm<WorkoutFormData>>['formState'];
-    };
+        defaultValues: {
+            name: '',
+            description: '',
+            difficulty: undefined as any,
+            duration: undefined as any,
+            tier_access: 'free',
+            video_url: '',
+            image_url: '',
+            calories_burned: undefined as any,
+        },
+    });
 
     useEffect(() => {
         fetchWorkout();
@@ -90,16 +92,58 @@ export default function EditWorkoutPage() {
         }
     };
 
-    const onSubmit = async (data: WorkoutFormData) => {
+    const onSubmit = async () => {
+        const data = getValues();
+
+        // Validate required fields
+        if (!data.name || data.name.trim() === '') {
+            setError('Please enter a workout name');
+            return;
+        }
+
+        if (!data.description || data.description.trim() === '') {
+            setError('Please enter a description');
+            return;
+        }
+
+        if (!data.difficulty) {
+            setError('Please select a difficulty level');
+            return;
+        }
+
+        if (!data.duration || data.duration < 1) {
+            setError('Please enter a valid duration (at least 1 minute)');
+            return;
+        }
+
+        // Validate arrays
+        if (selectedMuscleGroups.length === 0) {
+            setError('Please select at least one muscle group');
+            return;
+        }
+
+        const filteredInstructions = instructions.filter((i) => i.trim() !== '');
+        if (filteredInstructions.length === 0) {
+            setError('Please add at least one instruction');
+            return;
+        }
+
         setSaving(true);
         setError('');
 
         try {
             const workoutData = {
-                ...data,
+                name: data.name,
+                description: data.description,
+                difficulty: data.difficulty,
+                duration: data.duration,
                 muscle_groups: selectedMuscleGroups,
                 equipment: selectedEquipment,
-                instructions: instructions.filter((i) => i.trim() !== ''),
+                instructions: filteredInstructions,
+                tier_access: data.tier_access || 'free',
+                video_url: data.video_url || null,
+                image_url: data.image_url || null,
+                calories_burned: data.calories_burned || null,
             };
 
             const { error: updateError } = await supabase
@@ -188,7 +232,10 @@ export default function EditWorkoutPage() {
                     </Alert>
                 )}
 
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                <form onSubmit={(e) => {
+                    e.preventDefault();
+                    onSubmit();
+                }} className="space-y-6">
                     {/* Name */}
                     <div>
                         <Label htmlFor="name">Workout Name *</Label>
@@ -239,7 +286,7 @@ export default function EditWorkoutPage() {
                             </Select>
                             {errors.difficulty && (
                                 <p className="text-red-500 text-sm mt-1">
-                                    {errors.difficulty.message}
+                                    {errors.difficulty?.message as string}
                                 </p>
                             )}
                         </div>
@@ -255,7 +302,7 @@ export default function EditWorkoutPage() {
                             />
                             {errors.duration && (
                                 <p className="text-red-500 text-sm mt-1">
-                                    {errors.duration.message}
+                                    {errors.duration?.message as string}
                                 </p>
                             )}
                         </div>
@@ -271,8 +318,8 @@ export default function EditWorkoutPage() {
                                     type="button"
                                     onClick={() => toggleMuscleGroup(group)}
                                     className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${selectedMuscleGroups.includes(group)
-                                            ? 'bg-blue-500 text-white'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        ? 'bg-blue-500 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                         }`}
                                 >
                                     {group}
@@ -296,8 +343,8 @@ export default function EditWorkoutPage() {
                                     type="button"
                                     onClick={() => toggleEquipment(equipment)}
                                     className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${selectedEquipment.includes(equipment)
-                                            ? 'bg-purple-500 text-white'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        ? 'bg-purple-500 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                         }`}
                                 >
                                     {equipment}

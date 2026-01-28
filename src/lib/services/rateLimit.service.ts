@@ -53,25 +53,40 @@ export class RateLimitService {
         limitType: 'per_minute' | 'monthly',
         maxRequests: number,
         windowSeconds: number
-    ) {
+    ): Promise<{ allowed: boolean; remaining: number; resetAt: Date; limitType?: string }> {
         const now = new Date();
         const windowStart = new Date(now.getTime() - windowSeconds * 1000);
 
-        const { data: limitData } = await this.supabase
+        // Use atomic upsert to prevent race conditions
+        // First, try to find an existing window
+        const { data: existingWindows } = await this.supabase
             .from('rate_limits')
             .select('*')
             .eq('api_key_id', keyId)
             .eq('limit_type', limitType)
             .gte('window_start', windowStart.toISOString())
-            .maybeSingle();
+            .order('window_start', { ascending: false })
+            .limit(1);
 
-        if (!limitData) {
-            await this.supabase.from('rate_limits').insert({
+        const existingWindow = existingWindows?.[0];
+
+        if (!existingWindow) {
+            // No existing window, create a new one
+            const { error } = await this.supabase.from('rate_limits').insert({
                 api_key_id: keyId,
                 limit_type: limitType,
                 window_start: now.toISOString(),
                 request_count: 1,
             });
+
+            if (error) {
+                // Handle unique constraint violation (another request created the window)
+                if (error.code === '23505') {
+                    // Retry with increment
+                    return this.checkLimit(keyId, limitType, maxRequests, windowSeconds);
+                }
+                throw error;
+            }
 
             return {
                 allowed: true,
@@ -80,26 +95,36 @@ export class RateLimitService {
             };
         }
 
-        if (limitData.request_count >= maxRequests) {
+        // Check if we're already at the limit
+        if (existingWindow.request_count >= maxRequests) {
             const resetAt = new Date(
-                new Date(limitData.window_start).getTime() + windowSeconds * 1000
+                new Date(existingWindow.window_start).getTime() + windowSeconds * 1000
             );
             return { allowed: false, remaining: 0, resetAt, limitType };
         }
 
-        await this.supabase
+        // Atomic increment using conditional update
+        const { data: updated, error } = await this.supabase
             .from('rate_limits')
             .update({
-                request_count: limitData.request_count + 1,
+                request_count: existingWindow.request_count + 1,
                 updated_at: now.toISOString(),
             })
-            .eq('id', limitData.id);
+            .eq('id', existingWindow.id)
+            .eq('request_count', existingWindow.request_count) // Optimistic locking
+            .select()
+            .single();
+
+        if (error || !updated) {
+            // Another request updated the count, retry
+            return this.checkLimit(keyId, limitType, maxRequests, windowSeconds);
+        }
 
         return {
             allowed: true,
-            remaining: maxRequests - (limitData.request_count + 1),
+            remaining: maxRequests - updated.request_count,
             resetAt: new Date(
-                new Date(limitData.window_start).getTime() + windowSeconds * 1000
+                new Date(existingWindow.window_start).getTime() + windowSeconds * 1000
             ),
         };
     }
@@ -179,6 +204,29 @@ export class RateLimitService {
         } catch (error) {
             console.error('Get monthly usage error:', error);
             return 0;
+        }
+    }
+
+    /**
+     * Cleanup old rate limit records to prevent table bloat
+     */
+    static async cleanupOldRecords(): Promise<void> {
+        try {
+            // Delete rate limit records older than 2 days
+            const cutoff = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+            const { error } = await this.supabase
+                .from('rate_limits')
+                .delete()
+                .lt('window_start', cutoff.toISOString());
+
+            if (error) {
+                console.error('Rate limit cleanup error:', error);
+            } else {
+                console.log('Successfully cleaned up old rate limit records');
+            }
+        } catch (error) {
+            console.error('Rate limit cleanup error:', error);
         }
     }
 }

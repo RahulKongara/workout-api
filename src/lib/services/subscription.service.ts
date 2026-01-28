@@ -4,7 +4,9 @@ import { getRazorpayInstance as razorpayInstance } from '@/lib/razorpay/client';
 import { ApiKeyService } from './apiKey.service';
 
 export class SubscriptionService {
-    private static supabase = createAdminClient();
+    private static get supabase() {
+        return createAdminClient();
+    }
 
     // Handle Razorpay subscription creation/activation
     static async handleSubscriptionActivated(webhookData: any) {
@@ -205,7 +207,9 @@ export class SubscriptionService {
     // Create free subscription
     static async createFreeSubscription(userId: string) {
         try {
-            const { data } = await this.supabase
+            console.log('Creating free subscription for user:', userId);
+
+            const { data, error } = await this.supabase
                 .from('subscriptions')
                 .insert({
                     user_id: userId,
@@ -215,8 +219,22 @@ export class SubscriptionService {
                 .select()
                 .single();
 
+            if (error) {
+                console.error('Failed to create subscription:', error);
+                throw error;
+            }
+
             if (data) {
-                await ApiKeyService.generateKey(userId, data.id, 'Default API Key');
+                console.log('Subscription created:', data.id);
+                try {
+                    const apiKey = await ApiKeyService.generateKey(userId, data.id, 'Default API Key');
+                    console.log('API key generated successfully:', apiKey.id);
+                } catch (keyError) {
+                    console.error('Failed to generate API key:', keyError);
+                    // Don't throw here - subscription was created successfully
+                }
+            } else {
+                console.error('Subscription created but no data returned');
             }
 
             return data;

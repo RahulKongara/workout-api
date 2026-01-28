@@ -34,12 +34,12 @@ export const SignupSchema = z.object({
 export const WorkoutFilterSchema = z.object({
     page: z.number().min(1).default(1),
     limit: z.number().min(1).max(100).default(20),
-    difficulty: z.enum(DIFFICULTY_LEVELS).optional(),
-    muscle_group: z.string().optional(),
-    equipment: z.string().optional(),
-    min_duration: z.number().min(0).optional(),
-    max_duration: z.number().max(300).optional(),
-    search: z.string().optional(),
+    difficulty: z.enum(DIFFICULTY_LEVELS).optional().nullable().transform(val => val ?? undefined),
+    muscle_group: z.string().optional().nullable().transform(val => val ?? undefined),
+    equipment: z.string().optional().nullable().transform(val => val ?? undefined),
+    min_duration: z.number().min(0).optional().nullable().transform(val => val ?? undefined),
+    max_duration: z.number().max(300).optional().nullable().transform(val => val ?? undefined),
+    search: z.string().optional().nullable().transform(val => val ?? undefined),
 });
 
 export type WorkoutFormData = z.infer<typeof WorkoutSchema>;

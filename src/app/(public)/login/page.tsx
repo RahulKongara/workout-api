@@ -29,14 +29,30 @@ export default function LoginPage() {
         setError('');
 
         try {
-            const { error: signInError } = await supabase.auth.signInWithPassword({
+            const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
                 email,
                 password,
             });
 
             if (signInError) throw signInError;
 
-            router.push(redirect);
+            // Ensure user data exists
+            if (!authData?.user) {
+                throw new Error('Authentication failed - no user data returned');
+            }
+
+            // Check if user is an admin
+            const { data: userData } = await supabase
+                .from('users')
+                .select('role')
+                .eq('id', authData.user.id)
+                .single();
+
+            if (userData?.role === 'admin') {
+                router.push('/admin/customers');
+            } else {
+                router.push(redirect);
+            }
             router.refresh();
         } catch (err: any) {
             setError(err.message || 'Failed to sign in');

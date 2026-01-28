@@ -1,12 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  LayoutDashboard, 
-  Dumbbell, 
-  Users, 
-  BarChart3, 
-  LogOut 
+import {
+  LayoutDashboard,
+  Dumbbell,
+  Users,
+  BarChart3,
+  LogOut
 } from 'lucide-react';
 
 export default async function AdminLayout({
@@ -20,7 +20,7 @@ export default async function AdminLayout({
   } = await (await supabase).auth.getUser();
 
   if (!user) {
-    redirect('/admin/login');
+    redirect('/login');
   }
 
   const { data: userData } = await (await supabase)
@@ -37,7 +37,7 @@ export default async function AdminLayout({
     'use server';
     const supabase = createClient();
     await (await supabase).auth.signOut();
-    redirect('/admin/login');
+    redirect('/login');
   };
 
   const navItems = [

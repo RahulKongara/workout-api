@@ -39,18 +39,55 @@ export default function NewWorkoutPage() {
         register,
         handleSubmit,
         setValue,
+        getValues,
         formState: { errors },
     } = useForm({
-        resolver: zodResolver(WorkoutSchema),
         defaultValues: {
+            name: '',
+            description: '',
+            difficulty: undefined,
+            duration: undefined,
             tier_access: 'free',
-            equipment: [],
-            muscle_groups: [],
-            instructions: [],
+            video_url: '',
+            image_url: '',
+            calories_burned: undefined,
         },
     });
 
     const onSubmit = async (data: WorkoutFormData) => {
+        // Validate required fields
+        if (!data.name || data.name.trim() === '') {
+            setError('Please enter a workout name');
+            return;
+        }
+
+        if (!data.description || data.description.trim() === '') {
+            setError('Please enter a description');
+            return;
+        }
+
+        if (!data.difficulty) {
+            setError('Please select a difficulty level');
+            return;
+        }
+
+        if (!data.duration || data.duration < 1) {
+            setError('Please enter a valid duration (at least 1 minute)');
+            return;
+        }
+
+        // Validate arrays
+        if (selectedMuscleGroups.length === 0) {
+            setError('Please select at least one muscle group');
+            return;
+        }
+
+        const filteredInstructions = instructions.filter((i) => i.trim() !== '');
+        if (filteredInstructions.length === 0) {
+            setError('Please add at least one instruction');
+            return;
+        }
+
         setLoading(true);
         setError('');
 
@@ -61,11 +98,27 @@ export default function NewWorkoutPage() {
 
             if (!user) throw new Error('Not authenticated');
 
+            // Generate slug from name
+            const slug = data.name
+                .toLowerCase()
+                .trim()
+                .replace(/[^\w\s-]/g, '')
+                .replace(/[\s_-]+/g, '-')
+                .replace(/^-+|-+$/g, '');
+
             const workoutData = {
-                ...data,
+                name: data.name,
+                slug: slug,
+                description: data.description,
+                difficulty: data.difficulty,
+                duration: data.duration,
                 muscle_groups: selectedMuscleGroups,
                 equipment: selectedEquipment,
-                instructions: instructions.filter((i) => i.trim() !== ''),
+                instructions: filteredInstructions,
+                tier_access: data.tier_access || 'free',
+                video_url: data.video_url || null,
+                image_url: data.image_url || null,
+                calories_burned: data.calories_burned || null,
                 created_by: user.id,
             };
 
@@ -135,7 +188,11 @@ export default function NewWorkoutPage() {
                     </Alert>
                 )}
 
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                <form onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = getValues();
+                    onSubmit(formData as any);
+                }} className="space-y-6">
                     {/* Name */}
                     <div>
                         <Label htmlFor="name">Workout Name *</Label>
@@ -217,8 +274,8 @@ export default function NewWorkoutPage() {
                                     type="button"
                                     onClick={() => toggleMuscleGroup(group)}
                                     className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${selectedMuscleGroups.includes(group)
-                                            ? 'bg-blue-500 text-white'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        ? 'bg-blue-500 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                         }`}
                                 >
                                     {group}
@@ -242,8 +299,8 @@ export default function NewWorkoutPage() {
                                     type="button"
                                     onClick={() => toggleEquipment(equipment)}
                                     className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${selectedEquipment.includes(equipment)
-                                            ? 'bg-purple-500 text-white'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        ? 'bg-purple-500 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                         }`}
                                 >
                                     {equipment}
