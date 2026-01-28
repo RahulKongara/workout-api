@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/client';
+import { CacheService, CACHE_TTL } from '@/lib/services/cache.service';
 import { Workout, WorkoutFilters, SubscriptionTier } from '@/types';
 import { generateSlug } from '@/lib/utils/helpers';
 
@@ -15,101 +16,127 @@ export class WorkoutService {
     equipment?: string;
     tier: SubscriptionTier;
     search?: string;
-  }) {
+  }): Promise<{ data: Workout[]; pagination: any; cached: boolean }> {
     try {
       const { page, limit, difficulty, muscleGroup, equipment, tier, search } = params;
-      const offset = (page - 1) * limit;
 
-      let query = this.supabase
-        .from('workouts')
-        .select('*', { count: 'exact' })
-        .eq('is_deleted', false);
+      // Generate cache key from params
+      const cacheKey = CacheService.generateKey(
+        'workouts',
+        'list',
+        CacheService.hashParams({ page, limit, difficulty, muscleGroup, equipment, tier, search })
+      );
 
-      // Tier-based filtering
-      const tierHierarchy = { free: 0, pro: 1, enterprise: 2 };
-      const userTierLevel = tierHierarchy[tier];
-      const allowedTiers = Object.entries(tierHierarchy)
-        .filter(([_, level]) => level <= userTierLevel)
-        .map(([t]) => t);
+      const { data: result, cached } = await CacheService.getOrSet(
+        cacheKey,
+        async () => {
+          const offset = (page - 1) * limit;
 
-      query = query.in('tier_access', allowedTiers);
+          let query = this.supabase
+            .from('workouts')
+            .select('*', { count: 'exact' })
+            .eq('is_deleted', false);
 
-      if (difficulty) {
-        query = query.eq('difficulty', difficulty);
-      }
+          // Tier-based filtering
+          const tierHierarchy = { free: 0, pro: 1, enterprise: 2 };
+          const userTierLevel = tierHierarchy[tier];
+          const allowedTiers = Object.entries(tierHierarchy)
+            .filter(([_, level]) => level <= userTierLevel)
+            .map(([t]) => t);
 
-      if (muscleGroup) {
-        query = query.contains('muscle_groups', [muscleGroup]);
-      }
+          query = query.in('tier_access', allowedTiers);
 
-      if (equipment) {
-        query = query.contains('equipment', [equipment]);
-      }
+          if (difficulty) {
+            query = query.eq('difficulty', difficulty);
+          }
 
-      if (search) {
-        query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
-      }
+          if (muscleGroup) {
+            query = query.contains('muscle_groups', [muscleGroup]);
+          }
 
-      const { data, error, count } = await query
-        .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
+          if (equipment) {
+            query = query.contains('equipment', [equipment]);
+          }
 
-      if (error) throw error;
+          if (search) {
+            query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+          }
 
-      return {
-        data: data as Workout[],
-        pagination: {
-          page,
-          limit,
-          total: count || 0,
-          totalPages: Math.ceil((count || 0) / limit),
+          const { data, error, count } = await query
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+          if (error) throw error;
+
+          return {
+            data: data as Workout[],
+            pagination: {
+              page,
+              limit,
+              total: count || 0,
+              totalPages: Math.ceil((count || 0) / limit),
+            },
+          };
         },
-      };
+        CACHE_TTL.WORKOUT_LIST
+      );
+
+      return { ...result, cached };
     } catch (error) {
       console.error('List workouts error:', error);
       throw error;
     }
   }
 
-  static async getById(id: string, tier?: SubscriptionTier) {
+  static async getById(id: string, tier?: SubscriptionTier): Promise<Workout | null> {
     try {
-      let query = this.supabase
-        .from('workouts')
-        .select('*')
-        .eq('is_deleted', false);
+      const cacheKey = CacheService.generateKey('workouts', 'single', id, tier);
 
-      // Try by ID first
-      let { data, error } = await query.eq('id', id).maybeSingle();
+      const { data: workout } = await CacheService.getOrSet(
+        cacheKey,
+        async () => {
+          let query = this.supabase
+            .from('workouts')
+            .select('*')
+            .eq('is_deleted', false);
 
-      // If not found, try by slug
-      if (!data) {
-        const slugQuery = this.supabase
-          .from('workouts')
-          .select('*')
-          .eq('is_deleted', false)
-          .eq('slug', id)
-          .maybeSingle();
+          // Try by ID first
+          let { data, error } = await query.eq('id', id).maybeSingle();
 
-        const slugResult = await slugQuery;
-        data = slugResult.data;
-        error = slugResult.error;
-      }
+          // If not found, try by slug
+          if (!data) {
+            const slugQuery = this.supabase
+              .from('workouts')
+              .select('*')
+              .eq('is_deleted', false)
+              .eq('slug', id)
+              .maybeSingle();
 
-      if (error) throw error;
-      if (!data) return null;
+            const slugResult = await slugQuery;
+            data = slugResult.data;
+            error = slugResult.error;
+          }
 
-      // Check tier access
-      if (tier) {
-        const tierHierarchy = { free: 0, pro: 1, enterprise: 2 };
-        const userTierLevel = tierHierarchy[tier];
-        const workoutTierLevel = tierHierarchy[data.tier_access as SubscriptionTier];
+          if (error) throw error;
+          if (!data) return null;
 
-        if (workoutTierLevel > userTierLevel) {
-          return null; // Not accessible for this tier
-        }
-      }
+          // Check tier access
+          if (tier) {
+            const tierHierarchy = { free: 0, pro: 1, enterprise: 2 };
+            const userTierLevel = tierHierarchy[tier];
+            const workoutTierLevel = tierHierarchy[data.tier_access as SubscriptionTier];
 
-      return data as Workout;
+            if (workoutTierLevel > userTierLevel) {
+              return null; // Not accessible for this tier
+            }
+          }
+
+          return data as Workout;
+        },
+        CACHE_TTL.WORKOUT_SINGLE
+      );
+
+      return workout;
     } catch (error) {
       console.error('Get workout by ID error:', error);
       throw error;
@@ -127,6 +154,10 @@ export class WorkoutService {
         .single();
 
       if (error) throw error;
+
+      // Invalidate list caches
+      await this.invalidateListCaches();
+
       return data as Workout;
     } catch (error) {
       console.error('Create workout error:', error);
@@ -150,6 +181,11 @@ export class WorkoutService {
         .single();
 
       if (error) throw error;
+
+      // Invalidate caches
+      await this.invalidateSingleCache(id);
+      await this.invalidateListCaches();
+
       return data as Workout;
     } catch (error) {
       console.error('Update workout error:', error);
@@ -169,6 +205,11 @@ export class WorkoutService {
           .eq('id', id);
         if (error) throw error;
       }
+
+      // Invalidate caches
+      await this.invalidateSingleCache(id);
+      await this.invalidateListCaches();
+
       return true;
     } catch (error) {
       console.error('Delete workout error:', error);
@@ -184,6 +225,11 @@ export class WorkoutService {
         .eq('id', id);
 
       if (error) throw error;
+
+      // Invalidate caches
+      await this.invalidateSingleCache(id);
+      await this.invalidateListCaches();
+
       return true;
     } catch (error) {
       console.error('Restore workout error:', error);
@@ -221,31 +267,64 @@ export class WorkoutService {
 
   static async getCategories() {
     try {
-      const { data, error } = await this.supabase
-        .from('workouts')
-        .select('muscle_groups, equipment, difficulty')
-        .eq('is_deleted', false);
+      const cacheKey = CacheService.generateKey('workouts', 'categories');
 
-      if (error) throw error;
+      const { data: categories } = await CacheService.getOrSet(
+        cacheKey,
+        async () => {
+          const { data, error } = await this.supabase
+            .from('workouts')
+            .select('muscle_groups, equipment, difficulty')
+            .eq('is_deleted', false);
 
-      const muscleGroups = new Set<string>();
-      const equipment = new Set<string>();
-      const difficulties = new Set<string>();
+          if (error) throw error;
 
-      data.forEach((workout: any) => {
-        workout.muscle_groups?.forEach((mg: string) => muscleGroups.add(mg));
-        workout.equipment?.forEach((eq: string) => equipment.add(eq));
-        difficulties.add(workout.difficulty);
-      });
+          const muscleGroups = new Set<string>();
+          const equipment = new Set<string>();
+          const difficulties = new Set<string>();
 
-      return {
-        muscleGroups: Array.from(muscleGroups).sort(),
-        equipment: Array.from(equipment).sort(),
-        difficulties: Array.from(difficulties),
-      };
+          data.forEach((workout: any) => {
+            workout.muscle_groups?.forEach((mg: string) => muscleGroups.add(mg));
+            workout.equipment?.forEach((eq: string) => equipment.add(eq));
+            difficulties.add(workout.difficulty);
+          });
+
+          return {
+            muscleGroups: Array.from(muscleGroups).sort(),
+            equipment: Array.from(equipment).sort(),
+            difficulties: Array.from(difficulties),
+          };
+        },
+        CACHE_TTL.CATEGORIES
+      );
+
+      return categories;
     } catch (error) {
       console.error('Get categories error:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Invalidate all workout list caches
+   */
+  private static async invalidateListCaches(): Promise<void> {
+    try {
+      await CacheService.delPattern('workouts:list:*');
+      await CacheService.del(CacheService.generateKey('workouts', 'categories'));
+    } catch (error) {
+      console.error('Failed to invalidate list caches:', error);
+    }
+  }
+
+  /**
+   * Invalidate single workout cache
+   */
+  private static async invalidateSingleCache(id: string): Promise<void> {
+    try {
+      await CacheService.delPattern(`workouts:single:${id}:*`);
+    } catch (error) {
+      console.error('Failed to invalidate single cache:', error);
     }
   }
 }

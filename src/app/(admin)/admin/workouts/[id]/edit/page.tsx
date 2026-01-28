@@ -17,6 +17,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ImageUpload } from '@/components/ui/image-upload';
 import { ArrowLeft, Plus, X } from 'lucide-react';
 import Link from 'next/link';
 import { Workout } from '@/types';
@@ -26,6 +27,7 @@ export default function EditWorkoutPage() {
     const [instructions, setInstructions] = useState<string[]>(['']);
     const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
     const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
+    const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -50,7 +52,6 @@ export default function EditWorkoutPage() {
             duration: undefined as any,
             tier_access: 'free',
             video_url: '',
-            image_url: '',
             calories_burned: undefined as any,
         },
     });
@@ -77,10 +78,10 @@ export default function EditWorkoutPage() {
             setValue('difficulty', data.difficulty);
             setValue('duration', data.duration);
             setValue('video_url', data.video_url || '');
-            setValue('image_url', data.image_url || '');
             setValue('calories_burned', data.calories_burned);
             setValue('tier_access', data.tier_access);
 
+            setImageUrl(data.image_url || null);
             setSelectedMuscleGroups(data.muscle_groups);
             setSelectedEquipment(data.equipment || []);
             setInstructions(data.instructions.length > 0 ? data.instructions : ['']);
@@ -142,7 +143,7 @@ export default function EditWorkoutPage() {
                 instructions: filteredInstructions,
                 tier_access: data.tier_access || 'free',
                 video_url: data.video_url || null,
-                image_url: data.image_url || null,
+                image_url: imageUrl,
                 calories_burned: data.calories_burned || null,
             };
 
@@ -414,13 +415,15 @@ export default function EditWorkoutPage() {
                     </div>
 
                     <div>
-                        <Label htmlFor="image_url">Image URL</Label>
-                        <Input
-                            id="image_url"
-                            {...register('image_url')}
-                            placeholder="https://..."
-                            className="mt-1"
-                        />
+                        <Label>Workout Image</Label>
+                        <div className="mt-2">
+                            <ImageUpload
+                                value={imageUrl || undefined}
+                                onChange={(url) => setImageUrl(url)}
+                                disabled={saving}
+                                folder="workouts"
+                            />
+                        </div>
                     </div>
 
                     {/* Tier Access */}

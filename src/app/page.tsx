@@ -236,8 +236,8 @@ curl -X GET "https://api.workoutapi.com/v1/workouts?muscle_group=chest" \\
             <div>
               <h4 className="font-semibold mb-4">Company</h4>
               <div className="space-y-2 text-sm text-gray-600">
-                <a href="#" className="block hover:text-gray-900">About</a>
-                <a href="#" className="block hover:text-gray-900">Contact</a>
+                <Link href="/company/about" className="block hover:text-gray-900">About</Link> 
+                <Link href="#" className="block hover:text-gray-900">Contact</Link>
               </div>
             </div>
             <div>

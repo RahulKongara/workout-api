@@ -6,6 +6,7 @@ import { ApiLoggerService } from '@/lib/services/apiLogger.service';
 import { ErrorResponses } from '@/lib/utils/errors';
 import { WorkoutFilterSchema } from '@/lib/utils/validation';
 import { generateRequestId } from '@/lib/utils/helpers';
+import { SubscriptionTier } from '@/types';
 
 export async function GET(request: NextRequest) {
     const startTime = Date.now();
@@ -37,26 +38,31 @@ export async function GET(request: NextRequest) {
 
         // Check rate limits
         const rateLimit = await RateLimitService.checkRateLimit(
-            validation.keyId!,
-            validation.tier!
+            validation.keyId,
+            validation.tier as SubscriptionTier
         );
 
         if (!rateLimit.allowed) {
-            const limit = 'limit' in rateLimit ? rateLimit.limit : 0;
-            const limitType = 'limitType' in rateLimit ? rateLimit.limitType : 'minute';
+            // Handle error case without resetAt
+            if ('error' in rateLimit) {
+                return ErrorResponses.internalError(requestId);
+            }
+
+            const limit = rateLimit.limit ?? 0;
+            const limitType = rateLimit.limitType;
             const response = ErrorResponses.rateLimitExceeded(
-                limit || 0,
-                rateLimit.resetAt!,
-                limitType || 'minute',
+                limit,
+                rateLimit.resetAt,
+                limitType,
                 requestId
             );
 
-            response.headers.set('X-RateLimit-Limit', String(limit || 0));
+            response.headers.set('X-RateLimit-Limit', String(limit));
             response.headers.set('X-RateLimit-Remaining', '0');
-            response.headers.set('X-RateLimit-Reset', rateLimit.resetAt!.toISOString());
+            response.headers.set('X-RateLimit-Reset', rateLimit.resetAt.toISOString());
             response.headers.set(
                 'Retry-After',
-                String(Math.ceil((rateLimit.resetAt!.getTime() - Date.now()) / 1000))
+                String(Math.ceil((rateLimit.resetAt.getTime() - Date.now()) / 1000))
             );
 
             return response;
@@ -92,7 +98,7 @@ export async function GET(request: NextRequest) {
             difficulty: params.difficulty,
             muscleGroup: params.muscle_group,
             equipment: params.equipment,
-            tier: validation.tier!,
+            tier: validation.tier as SubscriptionTier,
             search: params.search,
         });
 
@@ -128,6 +134,7 @@ export async function GET(request: NextRequest) {
                 requestId,
                 timestamp: new Date().toISOString(),
                 version: 'v1',
+                cached: result.cached,
             },
         });
 
@@ -136,6 +143,9 @@ export async function GET(request: NextRequest) {
         response.headers.set('X-RateLimit-Limit', String(limitValue));
         response.headers.set('X-RateLimit-Remaining', String(rateLimit.remaining));
         response.headers.set('X-RateLimit-Reset', rateLimit.resetAt!.toISOString());
+
+        // Add cache status header
+        response.headers.set('X-Cache', result.cached ? 'HIT' : 'MISS');
 
         return response;
     } catch (error) {

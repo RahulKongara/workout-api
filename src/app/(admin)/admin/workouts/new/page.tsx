@@ -19,6 +19,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ImageUpload } from '@/components/ui/image-upload';
 import { ArrowLeft, Plus, X } from 'lucide-react';
 import Link from 'next/link';
 
@@ -26,6 +27,7 @@ export default function NewWorkoutPage() {
     const [instructions, setInstructions] = useState<string[]>(['']);
     const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
     const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
+    const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -49,7 +51,6 @@ export default function NewWorkoutPage() {
             duration: undefined,
             tier_access: 'free',
             video_url: '',
-            image_url: '',
             calories_burned: undefined,
         },
     });
@@ -117,7 +118,7 @@ export default function NewWorkoutPage() {
                 instructions: filteredInstructions,
                 tier_access: data.tier_access || 'free',
                 video_url: data.video_url || null,
-                image_url: data.image_url || null,
+                image_url: imageUrl,
                 calories_burned: data.calories_burned || null,
                 created_by: user.id,
             };
@@ -370,13 +371,15 @@ export default function NewWorkoutPage() {
                     </div>
 
                     <div>
-                        <Label htmlFor="image_url">Image URL</Label>
-                        <Input
-                            id="image_url"
-                            {...register('image_url')}
-                            placeholder="https://..."
-                            className="mt-1"
-                        />
+                        <Label>Workout Image</Label>
+                        <div className="mt-2">
+                            <ImageUpload
+                                value={imageUrl || undefined}
+                                onChange={(url) => setImageUrl(url)}
+                                disabled={loading}
+                                folder="workouts"
+                            />
+                        </div>
                     </div>
 
                     {/* Tier Access */}

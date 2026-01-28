@@ -1,18 +1,27 @@
 import { createAdminClient } from '@/lib/supabase/client';
+import { CacheService } from '@/lib/services/cache.service';
 import { TIER_LIMITS } from '@/lib/constants';
 import { SubscriptionTier } from '@/types';
 import { generateRequestId } from '@/lib/utils/helpers';
+
+type RateLimitResult =
+    | { allowed: true; remaining: number; limit: number; resetAt: Date }
+    | { allowed: false; remaining: number; resetAt: Date; limitType: string; limit?: number };
 
 export class RateLimitService {
     private static get supabase() {
         return createAdminClient();
     }
 
-    static async checkRateLimit(keyId: string, tier: SubscriptionTier) {
+    /**
+     * Check rate limits using Redis for fast, atomic operations
+     */
+    static async checkRateLimit(keyId: string, tier: SubscriptionTier): Promise<RateLimitResult | { allowed: false; error: string }> {
         try {
             const limits = TIER_LIMITS[tier];
 
-            const minuteCheck = await this.checkLimit(
+            // Check per-minute rate limit (uses Redis)
+            const minuteCheck = await this.checkRedisLimit(
                 keyId,
                 'per_minute',
                 limits.perMinute,
@@ -20,16 +29,15 @@ export class RateLimitService {
             );
 
             if (!minuteCheck.allowed) {
-                return minuteCheck;
+                return {
+                    ...minuteCheck,
+                    limit: limits.perMinute,
+                };
             }
 
+            // Check monthly limit if applicable (uses DB for persistence)
             if (limits.monthly !== -1) {
-                const monthlyCheck = await this.checkLimit(
-                    keyId,
-                    'monthly',
-                    limits.monthly,
-                    30 * 24 * 60 * 60
-                );
+                const monthlyCheck = await this.checkMonthlyLimit(keyId, limits.monthly);
 
                 if (!monthlyCheck.allowed) {
                     return monthlyCheck;
@@ -48,87 +56,114 @@ export class RateLimitService {
         }
     }
 
-    private static async checkLimit(
+    /**
+     * Redis-based sliding window rate limiting
+     * Much faster than database queries (~1ms vs ~50-100ms)
+     */
+    private static async checkRedisLimit(
         keyId: string,
-        limitType: 'per_minute' | 'monthly',
+        limitType: string,
         maxRequests: number,
         windowSeconds: number
-    ): Promise<{ allowed: boolean; remaining: number; resetAt: Date; limitType?: string }> {
-        const now = new Date();
-        const windowStart = new Date(now.getTime() - windowSeconds * 1000);
+    ): Promise<
+        | { allowed: true; remaining: number; resetAt: Date }
+        | { allowed: false; remaining: number; resetAt: Date; limitType: string }
+    > {
+        const now = Date.now();
+        const windowKey = CacheService.generateKey('ratelimit', keyId, limitType);
 
-        // Use atomic upsert to prevent race conditions
-        // First, try to find an existing window
-        const { data: existingWindows } = await this.supabase
-            .from('rate_limits')
-            .select('*')
-            .eq('api_key_id', keyId)
-            .eq('limit_type', limitType)
-            .gte('window_start', windowStart.toISOString())
-            .order('window_start', { ascending: false })
-            .limit(1);
+        try {
+            // Atomic increment
+            const count = await CacheService.incr(windowKey);
 
-        const existingWindow = existingWindows?.[0];
+            // Set expiry on first request in window
+            if (count === 1) {
+                await CacheService.expire(windowKey, windowSeconds);
+            }
 
-        if (!existingWindow) {
-            // No existing window, create a new one
-            const { error } = await this.supabase.from('rate_limits').insert({
-                api_key_id: keyId,
-                limit_type: limitType,
-                window_start: now.toISOString(),
-                request_count: 1,
-            });
+            const ttl = await CacheService.ttl(windowKey);
+            const resetAt = new Date(now + (ttl > 0 ? ttl * 1000 : windowSeconds * 1000));
 
-            if (error) {
-                // Handle unique constraint violation (another request created the window)
-                if (error.code === '23505') {
-                    // Retry with increment
-                    return this.checkLimit(keyId, limitType, maxRequests, windowSeconds);
-                }
-                throw error;
+            if (count > maxRequests) {
+                return {
+                    allowed: false,
+                    remaining: 0,
+                    resetAt,
+                    limitType,
+                };
             }
 
             return {
                 allowed: true,
-                remaining: maxRequests - 1,
-                resetAt: new Date(now.getTime() + windowSeconds * 1000),
+                remaining: Math.max(0, maxRequests - count),
+                resetAt,
+            };
+        } catch (error) {
+            console.error('Redis rate limit error, falling back to allow:', error);
+            // On Redis failure, fail open (allow the request)
+            return {
+                allowed: true,
+                remaining: maxRequests,
+                resetAt: new Date(now + windowSeconds * 1000),
             };
         }
+    }
 
-        // Check if we're already at the limit
-        if (existingWindow.request_count >= maxRequests) {
-            const resetAt = new Date(
-                new Date(existingWindow.window_start).getTime() + windowSeconds * 1000
-            );
-            return { allowed: false, remaining: 0, resetAt, limitType };
-        }
+    /**
+     * Monthly limit check - uses database since we need persistence across months
+     * Cached for 1 minute to reduce DB queries
+     */
+    private static async checkMonthlyLimit(
+        keyId: string,
+        maxMonthly: number
+    ): Promise<
+        | { allowed: true; remaining: number; resetAt: Date }
+        | { allowed: false; remaining: number; resetAt: Date; limitType: string }
+    > {
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
 
-        // Atomic increment using conditional update
-        const { data: updated, error } = await this.supabase
-            .from('rate_limits')
-            .update({
-                request_count: existingWindow.request_count + 1,
-                updated_at: now.toISOString(),
-            })
-            .eq('id', existingWindow.id)
-            .eq('request_count', existingWindow.request_count) // Optimistic locking
-            .select()
-            .single();
+        const startOfNextMonth = new Date(startOfMonth);
+        startOfNextMonth.setMonth(startOfNextMonth.getMonth() + 1);
 
-        if (error || !updated) {
-            // Another request updated the count, retry
-            return this.checkLimit(keyId, limitType, maxRequests, windowSeconds);
+        // Cache the monthly count for 1 minute
+        const cacheKey = CacheService.generateKey('monthly_usage', keyId, startOfMonth.toISOString().slice(0, 7));
+
+        const { data: count, cached } = await CacheService.getOrSet(
+            cacheKey,
+            async () => {
+                const { count, error } = await this.supabase
+                    .from('api_usage')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('api_key_id', keyId)
+                    .gte('created_at', startOfMonth.toISOString());
+
+                if (error) throw error;
+                return count || 0;
+            },
+            60 // Cache for 1 minute
+        );
+
+        if (count >= maxMonthly) {
+            return {
+                allowed: false,
+                remaining: 0,
+                resetAt: startOfNextMonth,
+                limitType: 'monthly',
+            };
         }
 
         return {
             allowed: true,
-            remaining: maxRequests - updated.request_count,
-            resetAt: new Date(
-                new Date(existingWindow.window_start).getTime() + windowSeconds * 1000
-            ),
+            remaining: maxMonthly - count,
+            resetAt: startOfNextMonth,
         };
     }
 
+    /**
+     * Log API usage (still goes to database for analytics)
+     */
     static async logUsage(
         keyId: string,
         endpoint: string,
@@ -147,6 +182,13 @@ export class RateLimitService {
                 response_time_ms: responseTimeMs,
                 request_id: requestId,
             });
+
+            // Invalidate monthly usage cache on new request
+            const startOfMonth = new Date();
+            startOfMonth.setDate(1);
+            startOfMonth.setHours(0, 0, 0, 0);
+            const cacheKey = CacheService.generateKey('monthly_usage', keyId, startOfMonth.toISOString().slice(0, 7));
+            await CacheService.del(cacheKey);
 
             return requestId;
         } catch (error) {
@@ -209,6 +251,7 @@ export class RateLimitService {
 
     /**
      * Cleanup old rate limit records to prevent table bloat
+     * (Less important now that we use Redis, but keeps DB clean)
      */
     static async cleanupOldRecords(): Promise<void> {
         try {
@@ -222,8 +265,6 @@ export class RateLimitService {
 
             if (error) {
                 console.error('Rate limit cleanup error:', error);
-            } else {
-                console.log('Successfully cleaned up old rate limit records');
             }
         } catch (error) {
             console.error('Rate limit cleanup error:', error);
