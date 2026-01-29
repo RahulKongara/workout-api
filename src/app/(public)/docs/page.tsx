@@ -10,6 +10,7 @@ import {
     CheckCircle,
     ArrowRight
 } from 'lucide-react';
+import { Breadcrumbs } from '@/components/shared/Breadcrumbs';
 
 export default function DocsPage() {
     const quickStart = `# Install your favorite HTTP client (example with axios)
@@ -98,6 +99,13 @@ console.log(workouts.data);`;
                     </div>
                 </div>
             </nav>
+
+            {/* Breadcrumbs */}
+            <div className="bg-gray-50 border-b border-gray-200">
+                <div className="max-w-7xl mx-auto px-4 py-3">
+                    <Breadcrumbs items={[{ label: 'Documentation' }]} />
+                </div>
+            </div>
 
             <div className="max-w-7xl mx-auto px-4 py-12">
                 {/* Header */}

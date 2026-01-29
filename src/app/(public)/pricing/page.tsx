@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { Check, Zap } from 'lucide-react';
 import { useRazorpay } from '@/lib/hooks/useRazorpay';
 import { TIER_FEATURES, TIER_PRICES } from '@/lib/constants';
 import { toast } from 'sonner';
+import { Breadcrumbs } from '@/components/shared/Breadcrumbs';
 
 export default function PricingPage() {
     const [loading, setLoading] = useState<string | null>(null);
@@ -155,6 +157,40 @@ export default function PricingPage() {
 
     return (
         <div className="min-h-screen bg-linear-to-b from-gray-50 to-white">
+            {/* Navigation */}
+            <nav className="border-b border-gray-200 bg-white">
+                <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-8">
+                        <Link href="/">
+                            <h1 className="text-2xl font-bold text-gray-900">WorkoutAPI</h1>
+                        </Link>
+                        <div className="hidden md:flex gap-6">
+                            <Link href="/docs" className="text-gray-600 hover:text-gray-900">
+                                Documentation
+                            </Link>
+                            <Link href="/pricing" className="text-blue-600 font-medium">
+                                Pricing
+                            </Link>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <Link href="/login">
+                            <Button variant="ghost">Sign In</Button>
+                        </Link>
+                        <Link href="/signup">
+                            <Button>Get Started</Button>
+                        </Link>
+                    </div>
+                </div>
+            </nav>
+
+            {/* Breadcrumbs */}
+            <div className="bg-gray-50 border-b border-gray-200">
+                <div className="max-w-7xl mx-auto px-4 py-3">
+                    <Breadcrumbs items={[{ label: 'Pricing' }]} />
+                </div>
+            </div>
+
             {/* Header */}
             <div className="max-w-7xl mx-auto px-4 py-16 text-center">
                 <Badge className="mb-4">Pricing</Badge>
@@ -173,8 +209,8 @@ export default function PricingPage() {
                         <Card
                             key={plan.name}
                             className={`relative ${plan.popular
-                                    ? 'border-2 border-blue-500 shadow-xl'
-                                    : 'border border-gray-200'
+                                ? 'border-2 border-blue-500 shadow-xl'
+                                : 'border border-gray-200'
                                 }`}
                         >
                             {plan.popular && (
@@ -203,8 +239,8 @@ export default function PricingPage() {
                                     onClick={plan.buttonAction}
                                     disabled={loading === plan.name.toLowerCase()}
                                     className={`w-full ${plan.popular
-                                            ? 'bg-blue-500 hover:bg-blue-600'
-                                            : 'bg-gray-900 hover:bg-gray-800'
+                                        ? 'bg-blue-500 hover:bg-blue-600'
+                                        : 'bg-gray-900 hover:bg-gray-800'
                                         }`}
                                 >
                                     {loading === plan.name.toLowerCase() ? (

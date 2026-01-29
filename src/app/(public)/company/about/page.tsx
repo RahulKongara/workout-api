@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { Breadcrumbs } from '@/components/shared/Breadcrumbs';
 
 export default function AboutPage() {
     return (
@@ -25,6 +26,18 @@ export default function AboutPage() {
                 </div>
             </header>
 
+            {/* Breadcrumbs */}
+            <div className="bg-gray-50 border-b border-gray-200">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+                    <Breadcrumbs
+                        items={[
+                            { label: 'Company', href: '#' },
+                            { label: 'About' }
+                        ]}
+                    />
+                </div>
+            </div>
+
             {/* Hero-section */}
             <main className="flex-1 flex items-center justify-center">
                 <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
@@ -32,8 +45,7 @@ export default function AboutPage() {
                         SusEyez Inc.
                     </h2>
                     <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-                        Access thousands of workouts, exercises, and fitness data through our
-                        simple and powerful REST API. Build amazing fitness applications.
+                        A development company based in India focused on building high quality software products at scale and fast.
                     </p>
                     <div className="flex flex-col sm:flex-row gap-4 justify-center">
                         <Link href="/signup">
@@ -49,7 +61,6 @@ export default function AboutPage() {
                     </div>
                 </div>
             </main>
-            <h1>About</h1>
         </div>
     );
 }
